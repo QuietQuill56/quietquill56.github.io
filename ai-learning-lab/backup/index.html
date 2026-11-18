@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Learning Lab | Safe Browser Backup</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:#23342f;background:#f5f7f4}
+*{box-sizing:border-box}body{margin:0;padding:24px 15px 50px;font-size:16px;line-height:1.55}
+main{max-width:720px;margin:0 auto}h1{font-size:clamp(1.65rem,4vw,2.15rem);line-height:1.2;margin:14px 0 12px}h2{font-size:1.18rem;margin:0 0 10px}
+p{margin:9px 0 15px}.muted{color:#55675f}.small{font-size:.89rem}
+a{color:#235f50}a.back{text-decoration:none;font-size:.94rem}
+.panel{background:white;border:1px solid #d8e1db;border-radius:14px;padding:18px;margin-top:16px}
+.info{background:#f0f5f1;border-left:3px solid #4b816c;padding:10px 13px;border-radius:4px}
+.warn{background:#fff8e8;border-left:3px solid #9d7828;padding:10px 13px;border-radius:4px}
+dl{display:grid;grid-template-columns:1fr auto;gap:8px 18px;margin:14px 0}
+dt{color:#51665a}dd{margin:0;font-weight:600;text-align:right}
+label{display:block;font-weight:600;margin-top:18px}
+input[type=text]{display:block;width:100%;padding:12px;border:1px solid #aebeb3;border-radius:8px;font:inherit;margin-top:5px}
+button,.linkbtn{display:inline-block;border:0;border-radius:9px;background:#204c42;color:white;padding:12px 15px;font:inherit;font-weight:600;cursor:pointer;margin:7px 9px 5px 0}
+button.secondary{background:#e5eee8;color:#204c42}
+button:disabled{opacity:.45;cursor:default}
+.status{padding:12px;margin-top:13px;border-radius:8px;background:#f0f5f1;white-space:pre-wrap;overflow-wrap:anywhere}
+code{font-size:.9em;overflow-wrap:anywhere}
+hr{border:0;border-top:1px solid #e0e7e2;margin:20px 0}
+</style>
+</head>
+<body>
+<main>
+<a class="back" href="../">← Back to Learning Lab</a>
+<h1>Back up this browser's Learning Lab data</h1>
+<p>This is a one-time safety step before we consider syncing your iPhone and Mac. It reads the record already stored in <strong>this browser</strong>. It does not change it, combine records, or send your learning data to a server.</p>
+<div class="info small"><strong>Do this separately in every place you've used the Lab.</strong> Start here from the Lab's <em>Data &amp; backup</em> screen on each device, especially if you added the Lab to your iPhone Home Screen. A locally downloaded HTML version may contain a separate copy; use that version's existing Export option to preserve it.</div>
+<section class="panel">
+<h2>What this browser contains</h2>
+<div id="state" role="status">Checking this browser...</div>
+<dl id="counts" hidden></dl>
+<p class="muted small" id="storageinfo"></p>
+</section>
+<section class="panel">
+<h2>Save a snapshot</h2>
+<p>A snapshot includes the complete original record plus a SHA-256 checksum so we can verify the file was not altered. It will be saved locally to your device, not uploaded anywhere.</p>
+<label for="label">Which device or browser is this?</label>
+<input id="label" type="text" maxlength="90" placeholder="e.g., Mac Safari, iPhone Home Screen app" autocomplete="off">
+<button id="download" disabled>Download snapshot</button>
+<button class="secondary" id="share" disabled>Save / share snapshot</button>
+<div class="status" id="savestatus" role="status">Nothing has been exported yet.</div>
+<p class="warn small"><strong>Keep the snapshot somewhere private.</strong> It is an unencrypted JSON file and may contain everything you've typed into the Lab. Do not upload it to the public GitHub repository or share it in a public conversation. Keep the original browser data until the future sync migration has been tested.</p>
+</section>
+<section class="panel">
+<h2>Check a saved snapshot</h2>
+<p>Choose a snapshot file to verify its checksum and inspect its contents. This check never imports the file or changes your browser's data.</p>
+<input id="verifyfile" type="file" accept=".json,application/json">
+<div class="status" id="verifystatus" role="status">No file checked yet.</div>
+</section>
+<p class="muted small">This tool checks only the key <code>ai-learning-lab-v1</code> at this site's web address. A missing record here says nothing about copies held by other browsers or local HTML files. The previous Lab and its original storage remain in place.</p>
+</main>
+<script>
+(function(){
+'use strict';
+const KEY='ai-learning-lab-v1';
+const readStatus=document.getElementById('state');
+const counts=document.getElementById('counts');
+const storageinfo=document.getElementById('storageinfo');
+const saveStatus=document.getElementById('savestatus');
+const verifyStatus=document.getElementById('verifystatus');
+const download=document.getElementById('download');
+const share=document.getElementById('share');
+const label=document.getElementById('label');
+const verifyfile=document.getElementById('verifyfile');
+const standalone=window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+storageinfo.textContent='Origin: '+location.origin+' | Mode: '+(standalone?'Home Screen / standalone':'browser tab');
+let exists=false;
+function count(obj){return obj&&typeof obj==='object'&&!Array.isArray(obj)?Object.keys(obj).length:0}
+function length(arr){return Array.isArray(arr)?arr.length:0}
+function summary(d){return {
+'Lesson records':count(d.lessons),
+'Course resources':count(d.resources),
+'Toolkit snippets':length(d.snippets),
+'Prompt problems / saved for later':length(d.savedForLater),
+'Prompt experiments':length(d.experiments),
+'Certification selections':count(d.certModules),
+'Activity history events':length(d.events),
+'General notes present':d.note?1:0,
+'Usage baseline present':d.baseline?1:0
+}}
+function readRaw(){return localStorage.getItem(KEY)}
+try{
+  const raw=readRaw();
+  if(raw===null){
+    readStatus.textContent='No Learning Lab record was found at this browser location. Do not create an empty snapshot or assume another device is empty.';
+  }else{
+    exists=true;
+    try{
+      const d=JSON.parse(raw);
+      readStatus.textContent='A saved record was found (version '+String(d&&d.v||'unknown')+').';
+      const s=summary(d||{});
+      for(const [k,v] of Object.entries(s)){
+        const dt=document.createElement('dt');dt.textContent=k;
+        const dd=document.createElement('dd');dd.textContent=String(v);
+        counts.appendChild(dt);counts.appendChild(dd);
+      }
+      counts.hidden=false;
+    }catch(e){
+      readStatus.textContent='A record exists but is not valid JSON. Do not reset it. You can still save its exact original text for recovery.';
+    }
+  }
+}catch(e){
+  readStatus.textContent='Browser storage could not be read ('+e.message+'). Nothing has been changed.';
+}
+download.disabled=!exists;
+share.disabled=!exists||!navigator.share;
+if(!navigator.share) share.title='Sharing files is not available in this browser. Use Download.';
+async function sha256(text){
+  if(!crypto||!crypto.subtle)throw Error('Checksum support unavailable. Use the HTTPS Learning Lab website.');
+  const bytes=new TextEncoder().encode(text);
+  const digest=await crypto.subtle.digest('SHA-256',bytes);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function makeSnapshot(){
+  const source=label.value.trim();
+  if(!source){label.focus();throw Error('Please label this device or browser first.')}
+  const raw=readRaw();
+  if(raw===null)throw Error('No browser record exists to back up. Nothing exported.');
+  const checksum=await sha256(raw);
+  let parsed=null;
+  try{parsed=JSON.parse(raw)}catch(e){}
+  const date=new Date().toISOString();
+  const snap={
+    snapshot_type:'ai-learning-lab-local-record',
+    snapshot_format_version:1,
+    captured_at:date,
+    source_label:source,
+    source_origin:location.origin,
+    source_mode:standalone?'standalone':'browser',
+    storage_key:KEY,
+    checksum_type:'SHA-256',
+    checksum_sha256:checksum,
+    data_summary:parsed?summary(parsed):null,
+    raw_record:raw
+  };
+  const safeLabel=source.replace(/[^a-z0-9_-]+/gi,'-').replace(/^-+|-+$/g,'').slice(0,48)||'browser';
+  const filename='ai-learning-lab-snapshot-'+safeLabel+'-'+date.replace(/[:.]/g,'-')+'.json';
+  return {file:new File([JSON.stringify(snap,null,2)],filename,{type:'application/json'}),hash:checksum};
+}
+download.addEventListener('click',async()=>{
+  try{
+    const s=await makeSnapshot();
+    const url=URL.createObjectURL(s.file);
+    const a=document.createElement('a');a.href=url;a.download=s.file.name;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    saveStatus.textContent='Snapshot prepared for download: '+s.file.name+'\nSHA-256: '+s.hash+'\nUse the checker below to verify the saved file.';
+  }catch(e){saveStatus.textContent='Not exported: '+e.message}
+});
+share.addEventListener('click',async()=>{
+  try{
+    const s=await makeSnapshot();
+    if(!navigator.canShare||!navigator.canShare({files:[s.file]}))throw Error('This browser cannot share the file. Use Download instead.');
+    await navigator.share({files:[s.file],title:'Learning Lab browser snapshot'});
+    saveStatus.textContent='Share sheet opened for '+s.file.name+'. Confirm the file is actually saved, then use the checker below.';
+  }catch(e){
+    if(e.name==='AbortError')return;
+    saveStatus.textContent='File not shared: '+e.message;
+  }
+});
+verifyfile.addEventListener('change',async()=>{
+  const file=verifyfile.files&&verifyfile.files[0];
+  if(!file)return;
+  try{
+    const snap=JSON.parse(await file.text());
+    if(snap.snapshot_type!=='ai-learning-lab-local-record'||snap.snapshot_format_version!==1||snap.storage_key!==KEY||typeof snap.raw_record!=='string'||typeof snap.checksum_sha256!=='string'){
+      throw Error('This is not a supported Learning Lab migration snapshot. No data was imported.');
+    }
+    const checksum=await sha256(snap.raw_record);
+    if(checksum!==snap.checksum_sha256.toLowerCase())throw Error('Checksum mismatch. This file may have changed. Keep your original browser data and recapture.');
+    const parsed=JSON.parse(snap.raw_record);
+    const s=summary(parsed);
+    verifyStatus.textContent='VERIFIED: Checksum matches the preserved browser record.\nSource: '+snap.source_label+'\nCaptured: '+snap.captured_at+'\n'+Object.entries(s).map(([k,v])=>k+': '+v).join('\n')+'\nNo data was imported or changed.';
+  }catch(e){verifyStatus.textContent='Not verified: '+e.message}
+});
+})();
+</script>
+</body>
+</html>
